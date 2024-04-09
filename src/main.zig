@@ -57,9 +57,9 @@ fn zalloc(private: ?*anyopaque, items: c_uint, size: c_uint) callconv(.C) ?*anyo
     if (private == null)
         return null;
 
-    const allocator = @ptrCast(*Allocator, @alignCast(@alignOf(*Allocator), private.?));
+    const allocator = @as(*Allocator, @ptrCast(@alignCast(private.?)));
     var buf = allocator.alloc(u8, ZallocHeader.size_of_aligned + (items * size)) catch return null;
-    const header = @ptrCast(*ZallocHeader, @alignCast(@alignOf(*ZallocHeader), buf.ptr));
+    const header = @as(*ZallocHeader, @ptrCast(@alignCast(buf.ptr)));
     header.* = .{
         .magic = magic_value,
         .size = items * size,
@@ -72,15 +72,15 @@ fn zfree(private: ?*anyopaque, addr: ?*anyopaque) callconv(.C) void {
     if (private == null)
         return;
 
-    const allocator = @ptrCast(*Allocator, @alignCast(@alignOf(*Allocator), private.?));
-    const header = @intToPtr(*ZallocHeader, @ptrToInt(addr.?) - ZallocHeader.size_of_aligned);
+    const allocator = @as(*Allocator, @ptrCast(@alignCast(private.?)));
+    const header = @as(*ZallocHeader, @ptrFromInt(@intFromPtr(addr.?) - ZallocHeader.size_of_aligned));
     if (builtin.mode != .ReleaseFast) {
         if (header.magic != magic_value)
             @panic("magic value is incorrect");
     }
 
     var buf: []align(alignment) u8 = undefined;
-    buf.ptr = @ptrCast([*]align(alignment) u8, @alignCast(alignment, header));
+    buf.ptr = @as([*]align(alignment) u8, @ptrCast(@alignCast(header)));
     buf.len = ZallocHeader.size_of_aligned + header.size;
     allocator.free(buf);
 }
@@ -126,7 +126,7 @@ pub const gzip = struct {
             }
 
             pub fn deinit(self: *Self) void {
-                const pinned = @ptrCast(*Allocator, @alignCast(@alignOf(*Allocator), self.stream.@"opaque".?));
+                const pinned = @as(*Allocator, @ptrCast(@alignCast(self.stream.@"opaque".?)));
                 _ = c.deflateEnd(self.stream);
                 self.allocator.destroy(pinned);
                 self.allocator.destroy(self.stream);
@@ -137,7 +137,7 @@ pub const gzip = struct {
                 while (true) {
                     self.stream.next_out = &tmp;
                     self.stream.avail_out = tmp.len;
-                    var rc = c.deflate(self.stream, c.Z_FINISH);
+                    const rc = c.deflate(self.stream, c.Z_FINISH);
                     if (rc != c.Z_STREAM_END)
                         return errorFromInt(rc);
 
@@ -152,13 +152,13 @@ pub const gzip = struct {
             pub fn write(self: *Self, buf: []const u8) WriterError!usize {
                 var tmp: [4096]u8 = undefined;
 
-                self.stream.next_in = @intToPtr([*]u8, @ptrToInt(buf.ptr));
-                self.stream.avail_in = @intCast(c_uint, buf.len);
+                self.stream.next_in = @as([*]u8, @ptrFromInt(@intFromPtr(buf.ptr)));
+                self.stream.avail_in = @intCast(buf.len);
 
                 while (true) {
                     self.stream.next_out = &tmp;
                     self.stream.avail_out = tmp.len;
-                    var rc = c.deflate(self.stream, c.Z_PARTIAL_FLUSH);
+                    const rc = c.deflate(self.stream, c.Z_PARTIAL_FLUSH);
                     if (rc != c.Z_OK)
                         return errorFromInt(rc);
 
@@ -181,7 +181,8 @@ pub const gzip = struct {
 
 test "compress gzip with zig interface" {
     const allocator = std.testing.allocator;
-    var fifo = std.fifo.LinearFifo(u8, .Dynamic).init(allocator);
+    const FifoType = std.fifo.LinearFifo(u8, .Dynamic);
+    var fifo = FifoType.init(allocator);
     defer fifo.deinit();
 
     const input = @embedFile("rfc1951.txt");
@@ -192,11 +193,11 @@ test "compress gzip with zig interface" {
     try writer.writeAll(input);
     try compressor.flush();
 
-    var decompressor = try std.compress.gzip.decompress(allocator, fifo.reader());
-    defer decompressor.deinit();
-
-    const actual = try decompressor.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+    const actual: []u8 = try allocator.alloc(u8, std.math.maxInt(usize));
+    var buffer = std.io.fixedBufferStream(actual);
     defer allocator.free(actual);
+
+    try std.compress.gzip.decompress(fifo.reader(), buffer.writer());
 
     try std.testing.expectEqualStrings(input, actual);
 }
