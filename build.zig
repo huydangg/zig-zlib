@@ -12,13 +12,13 @@ pub fn build(b: *std.Build) void {
     lib.linkLibC();
     lib.addCSourceFiles(.{ .files = srcs, .flags = &.{"-std=c89"} });
 
-    lib.installHeader(.{ .path = "zlib/zlib.h" }, "zlib.h");
-    lib.installHeader(.{ .path = "zlib/zconf.h" }, "zconf.h");
+    lib.installHeader(b.path("zlib/zlib.h"), "zlib.h");
+    lib.installHeader(b.path("zlib/zconf.h"), "zconf.h");
 
     b.installArtifact(lib);
 
     const tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
     });
     tests.linkLibrary(lib);
 
